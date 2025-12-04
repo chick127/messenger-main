@@ -180,9 +180,9 @@ def handle_send_message(data):
     )
 
 
-# 6. 서버 실행 (로컬용)
+# Vercel용 WSGI app export (SocketIO 포함)
+application = app
+
+# 로컬 실행용
 if __name__ == '__main__':
     socketio.run(app, debug=True)
-
-# Vercel용 app export
-app = app

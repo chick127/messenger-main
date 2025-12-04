@@ -1,10 +1,11 @@
-from flask import Flask, render_template
+import os
+import sys
 
-app = Flask(__name__)
+# Add the parent directory to the path so we can import from the main app
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-@app.route('/')
-def home():
-    # HTML 템플릿을 렌더링하거나 간단한 응답을 반환
-    return '<h1>Hello from Python Vercel Function!</h1>'
+# Import the Flask app from the main app.py
+from app import app
 
-# Vercel은 이 'app' 변수를 Serverless Function의 진입점(Entry Point)으로 사용합니다.
+# Vercel expects the app to be named 'app' for WSGI
+application = app

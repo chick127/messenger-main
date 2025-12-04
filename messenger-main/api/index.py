@@ -3,50 +3,67 @@
 import os
 import sys
 import base64
+from functools import wraps
 
 # --- crypto 폴더 경로 추가 ---
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 부모 디렉토리
+# app.py가 루트 디렉토리에 있으므로, BASE_DIR은 현재 파일의 디렉토리가 되어야 합니다.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
 CRYPTO_DIR = os.path.join(BASE_DIR, 'crypto')
 sys.path.append(CRYPTO_DIR)
 
 # --- 암호화 모듈 가져오기 ---
 try:
+    # crypto 폴더가 루트에 있다면 이 경로는 올바르게 작동해야 합니다.
     from aes_module import AESCipher
     from rsa_module import RSACipher
 except ImportError:
-    print("FATAL ERROR: crypto 모듈을 불러올 수 없습니다.")
+    # Vercel 빌드 환경에서는 이 메시지가 보일 수 있습니다.
+    print("FATAL ERROR: crypto 모듈을 불러올 수 없습니다. 경로 확인 필요:", CRYPTO_DIR)
     sys.exit(1)
 
 # --- Flask & SocketIO ---
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room
 from cryptography.exceptions import InvalidTag
+# Flask-SocketIO가 eventlet을 사용하도록 강제 (Vercel에서 권장)
+import eventlet 
+eventlet.monkey_patch() 
+
 
 # 1. Flask + SocketIO 생성
+# Vercel에서는 WSGI/ASGI 앱만 필요하므로, 이 파일에서 WSGI/ASGI 앱을 export 해야 합니다.
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Secret Key는 환경 변수로 설정하는 것이 좋습니다.
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24)) 
+# Vercel 환경에서 SocketIO 설정 (WebSocket 연결 허용)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet') 
 
-# 2. 임시 저장소
+# 2. 임시 저장소 (Serverless Function이므로 매번 초기화됨을 인지해야 함)
+# 실제 프로덕션에서는 Redis나 데이터베이스를 사용해야 합니다.
 USERS = {}
 SESSION_KEYS = {}
 
 # 3. 서버 시작 시 RSA 키 생성
 def initialize_users():
-    USERS['Alice'] = RSACipher()
-    USERS['Bob'] = RSACipher()
-    print("--- 서버 초기화 완료 (Alice, Bob RSA 키 생성) ---")
+    # USERS 딕셔너리가 비어있을 때만 초기화
+    if not USERS:
+        USERS['Alice'] = RSACipher()
+        USERS['Bob'] = RSACipher()
+        print("--- 서버 초기화 완료 (Alice, Bob RSA 키 생성) ---")
 
-initialize_users()
+# initialize_users는 라우팅이나 이벤트가 호출될 때 실행되도록 변경
+# Vercel Serverless Function은 cold start 시에만 실행됨
 
 # 4. 라우팅
 @app.route('/')
 def index():
+    initialize_users() # 요청 시 초기화 체크
     return render_template('index.html', users=USERS.keys())
 
 
 @app.route('/messenger/<sender>', methods=['GET'])
 def messenger(sender):
+    initialize_users() # 요청 시 초기화 체크
     if sender not in USERS:
         return "사용자 오류", 404
 
@@ -93,14 +110,13 @@ def messenger(sender):
         return "키 교환 오류 발생", 500
 
 # 5. SocketIO 이벤트
-
 @socketio.on('connect')
 def handle_connect():
     print(f"클라이언트 연결: {request.sid}")
 
-
 @socketio.on('register_user')
 def handle_register_user(data):
+    initialize_users() # 이벤트 발생 시 초기화 체크
     username = data.get('username')
     if username in USERS:
         join_room(username)
@@ -110,9 +126,12 @@ def handle_register_user(data):
 
 @socketio.on('send_message')
 def handle_send_message(data):
+    initialize_users() # 이벤트 발생 시 초기화 체크
     sender = data.get('sender')
     recipient = data.get('recipient')
     message = data.get('message')
+
+    # ... (나머지 SocketIO 로직은 동일) ...
 
     if sender not in SESSION_KEYS or recipient not in SESSION_KEYS:
         emit('status_update', {'msg': '세션 키 없음'}, room=sender)
@@ -125,8 +144,8 @@ def handle_send_message(data):
     encrypted_b64 = sender_cipher.encrypt(message, associated_data=associated_data)
 
     print(f"\n[SocketIO 송신: {sender} -> {recipient}]")
-    print(f"  원본 메시지: '{message}'")
-    print(f"  암호문 (B64): '{encrypted_b64}'")
+    print(f"  원본 메시지: '{message}'")
+    print(f"  암호문 (B64): '{encrypted_b64}'")
 
     # ② 복호화 시뮬레이션 및 무결성 검증 (수신자 역할 시뮬레이션)
     decrypted_message = None
@@ -180,9 +199,11 @@ def handle_send_message(data):
     )
 
 
-# Vercel용 WSGI app export (SocketIO 포함)
-application = app
+# Vercel용 WSGI app export (SocketIO를 Flask 앱의 WSGI 래퍼로 사용)
+# Flask-SocketIO 앱을 Vercel에 노출하는 올바른 방식입니다.
+application = socketio.wsgi_app
 
 # 로컬 실행용
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    # 로컬에서는 socketio.run을 사용하여 eventlet 서버를 실행합니다.
+    socketio.run(app, debug=True, port=int(os.environ.get('PORT', 5000)))

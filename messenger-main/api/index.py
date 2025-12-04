@@ -199,11 +199,10 @@ def handle_send_message(data):
     )
 
 
-# Vercel용 WSGI app export (SocketIO를 Flask 앱의 WSGI 래퍼로 사용)
-# Flask-SocketIO 앱을 Vercel에 노출하는 올바른 방식입니다.
+# Render용 WSGI app export
 application = socketio.wsgi_app
 
-# 로컬 실행용
+# Render/프로덕션 환경에서 실행
 if __name__ == '__main__':
-    # 로컬에서는 socketio.run을 사용하여 eventlet 서버를 실행합니다.
-    socketio.run(app, debug=True, port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)

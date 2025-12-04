@@ -57,17 +57,44 @@ socket.on('send_success', function (result) {
   updateResultDetail(result)
 })
 
+// 6. 변조 시뮬레이션 결과 수신
+socket.on('tamper_result', function (result) {
+  // 채팅창에 변조 시뮬레이션 결과를 표시
+  if (result.integrity_verified) {
+    displayMessage(
+      `[변조 시뮬레이션] 무결성 검증 성공: ${
+        result.decrypted_message || 'N/A'
+      }`,
+      'System'
+    )
+  } else {
+    displayMessage(
+      `[변조 시뮬레이션] 무결성 검증 실패 - 메시지 변조 감지됨`,
+      'warning'
+    )
+  }
+
+  // 상세 결과 영역 업데이트
+  updateTamperDetail(result)
+})
+
 // 5. 새 메시지 수신 (상대방이 보낸 암호문)
 socket.on('new_message', function (payload) {
-  console.log(
-    '상대방으로부터 암호문 수신. 서버 로그에서 복호화 결과를 확인하세요.'
-  ) // 💡 수정된 부분: payload.decrypted_message 사용 // 서버는 이미 수신자 시뮬레이션으로 복호화를 완료했으므로, 해당 복호화 메시지를 표시합니다.
+  console.log('상대방으로부터 암호문 수신. 무결성 검증 결과를 확인하세요.')
 
-  const received_text = payload.decrypted_message
-    ? `${payload.decrypted_message}`
-    : `메시지 수신 (복호화 실패 또는 비정상)` // 복호화 메시지가 null일 경우 처리
+  let received_text = ''
+  let message_class = payload.sender
 
-  displayMessage(received_text, payload.sender)
+  if (payload.integrity_verified && payload.decrypted_message) {
+    // 무결성 검증 성공: T_new == T' → 메시지 표시
+    received_text = payload.decrypted_message
+  } else {
+    // 무결성 검증 실패: T_new != T' → 메시지 폐기 및 경고
+    received_text = `[경고] 메시지 변조 또는 위조 감지됨 - 메시지 폐기됨`
+    message_class = 'warning'
+  }
+
+  displayMessage(received_text, message_class)
 })
 
 /**
@@ -97,9 +124,29 @@ function updateResultDetail(result) {
         <h3>전송 정보 (SocketIO)</h3>
         <p><strong>송신자 (${SENDER}) 원본 메시지:</strong> ${result.original_message}</p>
         <p style="color: red;"><strong>네트워크 전송 데이터 (암호문):</strong> ${result.encrypted_message}</p>
-        
+
         <h3>수신 시뮬레이션 결과 (${receiver})</h3>
         <p><strong>복호화 상태:</strong> ${result.decryption_status}</p>
         <p style="font-style: italic;">(💡 서버 콘솔을 통해 GCM 무결성 검증 및 복호화 과정을 확인하세요.)</p>
     `
+}
+
+// 무결성 검증 시뮬레이션: 암호문을 변조하여 전송
+function tamperAndSend() {
+  const tamperInput = document.getElementById('tamper-input')
+  const tamperedMessage = tamperInput.value.trim()
+
+  if (tamperedMessage === '') {
+    alert('변조할 암호문을 입력해주세요.')
+    return
+  }
+
+  // 서버에 변조된 암호문을 직접 전송하여 무결성 검증 실패를 시뮬레이션
+  socket.emit('tamper_message', {
+    sender: SENDER,
+    recipient: RECIPIENT,
+    tampered_encrypted: tamperedMessage,
+  })
+
+  tamperInput.value = ''
 }

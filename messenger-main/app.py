@@ -128,23 +128,33 @@ def handle_send_message(data):
     print(f"  원본 메시지: '{message}'")
     print(f"  암호문 (B64): '{encrypted_b64}'")
 
-    # ② 복호화 시뮬레이션 (여기에서 decrypted_message 생성)
+    # ② 복호화 시뮬레이션 및 무결성 검증 (수신자 역할 시뮬레이션)
     decrypted_message = None
     recipient_cipher = SESSION_KEYS[recipient]
+    integrity_verified = False
 
     try:
+        # 수신자가 암호문을 받아서 GCM 태그 검증 및 복호화 시도
         decrypted_message = recipient_cipher.decrypt(
             encrypted_b64,
             associated_data=associated_data
         )
-        print(f"[수신 시뮬레이션: {recipient}] 복호화 성공 → '{decrypted_message}'")
-        decrypt_status = f"✅ 성공: '{decrypted_message}'"
+
+        # 태그 검증 성공: T_new == T' (수신된 태그와 계산된 태그 일치)
+        integrity_verified = True
+        print(f"[수신 시뮬레이션: {recipient}] ✅ 무결성 검증 성공 (T_new == T') → 복호화 성공: '{decrypted_message}'")
+        decrypt_status = f"✅ 무결성 검증 성공: '{decrypted_message}'"
 
     except InvalidTag:
-        print(f"[수신 시뮬레이션: {recipient}] ❌ GCM TAG 오류")
-        decrypt_status = "❌ TAG 오류 - 메시지 변조"
+        # 태그 검증 실패: T_new != T' (메시지 변조 또는 위조)
+        integrity_verified = False
+        decrypted_message = None
+        print(f"[수신 시뮬레이션: {recipient}] ❌ 무결성 검증 실패 (T_new != T') - GCM TAG 오류: 메시지 변조 또는 위조")
+        decrypt_status = "❌ 무결성 검증 실패 - 메시지 변조 또는 위조 감지"
 
     except Exception as e:
+        integrity_verified = False
+        decrypted_message = None
         print(f"[수신 시뮬레이션: {recipient}] 오류: {e}")
         decrypt_status = f"❌ 오류: {e}"
 
